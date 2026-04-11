@@ -20,7 +20,7 @@ export function LoginPage() {
     setSubmitting(true)
     try {
       await login(email, password)
-      navigate('/tokens')
+      navigate('/projects')
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.detail)

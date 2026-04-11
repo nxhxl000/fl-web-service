@@ -13,10 +13,10 @@ export function LandingPage() {
       <div className="mt-8 flex justify-center gap-3">
         {user ? (
           <Link
-            to="/tokens"
+            to="/projects"
             className="rounded bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-700"
           >
-            Go to client tokens
+            Browse projects
           </Link>
         ) : (
           <>
