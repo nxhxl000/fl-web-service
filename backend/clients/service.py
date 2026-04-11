@@ -1,7 +1,7 @@
 import hashlib
 import secrets
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -85,6 +85,17 @@ def list_all_tokens_in_project(
         )
         for token, email in db.execute(stmt).all()
     ]
+
+
+def touch_client_token(db: Session, plaintext: str) -> ClientToken | None:
+    token_hash = hash_client_token(plaintext)
+    record = db.scalar(select(ClientToken).where(ClientToken.token_hash == token_hash))
+    if record is None:
+        return None
+    record.last_seen_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(record)
+    return record
 
 
 def delete_client_token(
