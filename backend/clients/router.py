@@ -8,20 +8,23 @@ from backend.clients.service import (
     ClientTokenNotFoundError,
     create_client_token,
     delete_client_token,
-    list_user_tokens,
+    list_user_tokens_in_project,
 )
 from backend.db import get_db
+from backend.projects.deps import get_project_or_404
+from backend.projects.models import Project
 
-router = APIRouter(prefix="/clients/tokens", tags=["clients"])
+router = APIRouter(prefix="/projects/{project_id}/tokens", tags=["client tokens"])
 
 
 @router.post("", response_model=ClientTokenCreated, status_code=status.HTTP_201_CREATED)
 def create_token(
     payload: ClientTokenCreate,
+    project: Project = Depends(get_project_or_404),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ClientTokenCreated:
-    record, plaintext = create_client_token(db, current_user, payload.name)
+    record, plaintext = create_client_token(db, current_user, project.id, payload.name)
     return ClientTokenCreated(
         id=record.id,
         name=record.name,
@@ -33,20 +36,22 @@ def create_token(
 
 @router.get("", response_model=list[ClientTokenOut])
 def list_tokens(
+    project: Project = Depends(get_project_or_404),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list:
-    return list_user_tokens(db, current_user)
+    return list_user_tokens_in_project(db, current_user, project.id)
 
 
 @router.delete("/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_token(
     token_id: int,
+    project: Project = Depends(get_project_or_404),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
     try:
-        delete_client_token(db, current_user, token_id)
+        delete_client_token(db, current_user, project.id, token_id)
     except ClientTokenNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

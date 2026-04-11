@@ -18,3 +18,13 @@ class ClientTokenOut(BaseModel):
 
 class ClientTokenCreated(ClientTokenOut):
     token: str
+
+
+class ClientTokenWithOwnerOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    user_email: str
+    created_at: datetime
+    last_seen_at: datetime | None

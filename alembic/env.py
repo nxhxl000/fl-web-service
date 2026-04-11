@@ -8,6 +8,7 @@ from backend.db import Base
 
 # Import models so their tables register on Base.metadata.
 from backend.auth import models as _auth_models  # noqa: F401
+from backend.projects import models as _project_models  # noqa: F401
 from backend.clients import models as _client_models  # noqa: F401
 
 config = context.config
