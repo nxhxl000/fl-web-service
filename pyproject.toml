@@ -1,0 +1,6 @@
+[project]
+name = "fl-web-service"
+version = "0.0.0"
+description = "Web service layer for the federated plant disease classification thesis project"
+requires-python = ">=3.12"
+dependencies = []
