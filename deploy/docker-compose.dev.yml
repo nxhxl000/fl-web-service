@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fl-web-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fl_web}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fl_web}
+      POSTGRES_DB: ${POSTGRES_DB:-fl_web}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fl_web} -d ${POSTGRES_DB:-fl_web}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
