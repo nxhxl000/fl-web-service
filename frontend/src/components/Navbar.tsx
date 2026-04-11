@@ -12,15 +12,18 @@ export function Navbar() {
 
   return (
     <nav className="border-b border-neutral-200 bg-white">
-      <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
+      <div className="flex items-center justify-between px-8 py-3">
         <Link to="/" className="font-semibold tracking-tight text-neutral-900">
           fl-web-service
+          {user?.is_admin && (
+            <span className="ml-1 font-normal text-neutral-500">(admin)</span>
+          )}
         </Link>
         <div className="flex items-center gap-4 text-sm">
           {user ? (
             <>
-              <Link to="/tokens" className="text-neutral-700 hover:text-neutral-900">
-                Client tokens
+              <Link to="/projects" className="text-neutral-700 hover:text-neutral-900">
+                Projects
               </Link>
               <span className="text-neutral-500">{user.email}</span>
               <button
