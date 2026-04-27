@@ -83,6 +83,7 @@ minio-data/
 /runs/
 /runs_data/
 /wandb/
+/exp/
 mlruns/
 *.pt
 *.pth
