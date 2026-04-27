@@ -1,3 +1,6 @@
+# ── Windows / WSL artifacts ──────────────────────────────────────────────────
+*:Zone.Identifier
+
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
@@ -73,10 +76,13 @@ redis-data/
 minio-data/
 
 # ── ML artifacts (local caches, downloaded datasets, checkpoints) ────────────
-models/
-checkpoints/
-runs/
-wandb/
+# anchored to repo root so they don't shadow Python modules like fl_app/models/
+# or backend/runs/.
+/models/
+/checkpoints/
+/runs/
+/runs_data/
+/wandb/
 mlruns/
 *.pt
 *.pth

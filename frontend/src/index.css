@@ -1,1 +1,5 @@
 @import "tailwindcss";
+
+.recharts-wrapper text {
+  font-family: inherit;
+}

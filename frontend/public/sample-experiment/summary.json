@@ -1,0 +1,45 @@
+{
+  "config": {
+    "partition-name": "cifar100__iid__n10__s42",
+    "model": "wrn_16_4",
+    "aggregation": "fedavg",
+    "enable-profiling": "false",
+    "benchmark-samples": 1000,
+    "benchmark-epochs": 2,
+    "num-server-rounds": 5,
+    "fraction-train": 1.0,
+    "min-train-nodes": 10,
+    "min-available-nodes": 10,
+    "per-client-chunks": "",
+    "per-client-epochs": "",
+    "excluded-clients": "",
+    "straggler-mode": "chunk",
+    "straggler-target": "min",
+    "straggler-tolerance": 0.05,
+    "straggler-min-chunk": 0.1,
+    "straggler-min-epochs": 1,
+    "data-dir": "data/",
+    "experiments-dir": "experiments",
+    "proximal-mu": 0.0005,
+    "server-momentum": 0.5,
+    "server-lr": 1.0,
+    "fedprox-client-lr": 0.1
+  },
+  "best_acc": 0.205,
+  "best_round": 5,
+  "rounds_completed": 5,
+  "num_rounds": 5,
+  "data_heterogeneity": {
+    "MPJS": 0.0,
+    "Gini_quantity": 0.0,
+    "num_classes": 100
+  },
+  "system_heterogeneity_mean": {
+    "SR": 1.5313945455864346,
+    "IF": 0.1392982764493899,
+    "I_s": 0.21166428708382995,
+    "W_total_sum": 419340.12
+  },
+  "excluded_clients": "",
+  "per_client_chunks": ""
+}
