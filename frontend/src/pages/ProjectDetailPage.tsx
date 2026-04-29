@@ -428,6 +428,9 @@ export function ProjectDetailPage() {
   }
 
   const handleDeleteRun = async (runId: number) => {
+    // Re-entry guard: a fast double-click can fire before the disabled prop
+    // takes effect on the button. Drop duplicates here.
+    if (runsBusy === runId) return
     if (!confirm(`Delete run #${runId}? This removes the run record and runs_data/run_${runId}/.`)) {
       return
     }
@@ -437,7 +440,13 @@ export function ProjectDetailPage() {
       await deleteRun(pid, runId)
       await refreshRuns()
     } catch (err) {
-      setRunsError(err instanceof ApiError ? err.detail : 'Failed to delete run')
+      // 404 = run was already deleted (e.g. previous attempt succeeded but UI
+      // didn't refresh in time). Treat as success — the desired end state.
+      if (err instanceof ApiError && err.status === 404) {
+        await refreshRuns()
+      } else {
+        setRunsError(err instanceof ApiError ? err.detail : 'Failed to delete run')
+      }
     } finally {
       setRunsBusy(null)
     }
