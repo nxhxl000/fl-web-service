@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
-from datasets import load_from_disk
+from fl_app.data import count_labels
 
 
 # ── Метрики гетерогенности ────────────────────────────────────────────────────
@@ -112,7 +112,9 @@ def _class_monopoly_index(dists: List[Dict[int, int]], num_classes: int) -> floa
 
 # ── Клиентский сбор распределения классов ────────────────────────────────────
 
-def collect_data_profile(partition_path: Path | str) -> Dict[str, float]:
+def collect_data_profile(
+    data_dir: Path | str, contract: Dict[str, Any]
+) -> Dict[str, float]:
     """Статистика клиентского датасета: размер + распределение классов.
 
     Возвращает dict с ключами:
@@ -122,16 +124,8 @@ def collect_data_profile(partition_path: Path | str) -> Dict[str, float]:
 
     Сервер на round 1 читает `data_cls_{N}` из MetricRecord для расчёта MPJS/Gini.
     """
-    ds = load_from_disk(str(partition_path))
-    keys = set(ds.features.keys())
-    label_col = next(c for c in ("label", "labels", "fine_label", "coarse_label") if c in keys)
-    labels = ds[label_col]
-
-    num_samples = len(labels)
-    class_counts: Dict[int, int] = {}
-    for lbl in labels:
-        class_counts[lbl] = class_counts.get(lbl, 0) + 1
-
+    class_counts = count_labels(data_dir, contract=contract)
+    num_samples = sum(class_counts.values())
     n_classes = len(class_counts)
     counts = list(class_counts.values())
     max_c = max(counts) if counts else 0

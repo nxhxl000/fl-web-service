@@ -1,21 +1,33 @@
-"""fl-client heartbeat loop.
+"""fl-client bootstrap + heartbeat + flwr-supernode launcher.
 
-Reads FL_TOKEN and FL_SERVER_URL from the environment and POSTs a heartbeat
-to {FL_SERVER_URL}/client/heartbeat every FL_HEARTBEAT_INTERVAL seconds.
+Container entrypoint: validates the local data folder against the project
+contract from the backend, writes `_fl_contract.json` next to the data,
+starts a heartbeat thread, then exec's `flwr-supernode` with the data dir
+pushed via `--node-config`.
 
-Day 4 milestone: prove the Docker container can authenticate with an opaque
-token and have its last_seen_at updated in the backend. No Flower yet.
+Env vars:
+  FL_TOKEN             (required) opaque project token
+  FL_SERVER_URL        (required) backend base URL, e.g. https://api.example.com
+  FL_SUPERLINK         (required) Flower SuperLink fleet addr, host:port
+  FL_DATA_DIR          (default /data) ImageFolder root with class subdirs
+  FL_HEARTBEAT_INTERVAL (default 30s)
+  FL_INSECURE          (default 1) pass --insecure to flwr-supernode
 """
 
+import json
 import logging
 import os
 import signal
+import subprocess
 import sys
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 DEFAULT_INTERVAL_SECONDS = 30
+CONTRACT_FILENAME = "_fl_contract.json"
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,45 +51,172 @@ def _require_env(name: str) -> str:
     return value
 
 
-def _send_heartbeat(url: str, token: str) -> int:
+def _fetch_contract(server_url: str, token: str) -> dict:
     req = urllib.request.Request(
-        url,
-        method="POST",
+        f"{server_url}/client/dataset-manifest",
         headers={"Authorization": f"Bearer {token}"},
     )
     with urllib.request.urlopen(req, timeout=10) as resp:
-        return resp.status
+        body = resp.read().decode("utf-8")
+    return json.loads(body)
+
+
+def _validate_local_data(data_dir: Path, class_names: list[str]) -> None:
+    """Reject if local layout violates the contract.
+
+    Rules:
+      - each subdir must be in class_names (no foreign classes)
+      - at least one subdir must intersect class_names with ≥1 image
+    """
+    if not data_dir.exists() or not data_dir.is_dir():
+        log.error("FL_DATA_DIR=%s does not exist or is not a directory", data_dir)
+        sys.exit(3)
+
+    canonical = set(class_names)
+    subdirs = [p for p in data_dir.iterdir() if p.is_dir()]
+    extra = sorted(p.name for p in subdirs if p.name not in canonical)
+    if extra:
+        log.error(
+            "Local data has classes not in the project contract: %s. "
+            "Remove or rename them. Allowed: %s.",
+            extra,
+            sorted(canonical),
+        )
+        sys.exit(3)
+
+    matched_with_images = []
+    for p in subdirs:
+        if p.name not in canonical:
+            continue
+        if any(f.is_file() and f.suffix.lower() in IMAGE_EXTS for f in p.iterdir()):
+            matched_with_images.append(p.name)
+
+    if not matched_with_images:
+        log.error(
+            "No class subdirectory under %s contains images matching the project contract.",
+            data_dir,
+        )
+        sys.exit(3)
+
+    log.info(
+        "data ok: %d/%d project classes present locally (%s)",
+        len(matched_with_images),
+        len(canonical),
+        ", ".join(sorted(matched_with_images)[:5])
+        + ("…" if len(matched_with_images) > 5 else ""),
+    )
+
+
+def _write_contract(data_dir: Path, manifest: dict) -> None:
+    contract = {
+        "class_names": manifest["class_names"],
+        "image_size": manifest.get("image_size"),
+        "image_mode": manifest.get("image_mode"),
+        "mean": manifest.get("mean"),
+        "std": manifest.get("std"),
+    }
+    (data_dir / CONTRACT_FILENAME).write_text(json.dumps(contract, indent=2))
+
+
+def _heartbeat_loop(server_url: str, token: str, interval: int) -> None:
+    url = f"{server_url}/client/heartbeat"
+    req_template = urllib.request.Request(
+        url, method="POST", headers={"Authorization": f"Bearer {token}"}
+    )
+    while not _stop.is_set():
+        try:
+            with urllib.request.urlopen(req_template, timeout=10) as resp:
+                log.debug("heartbeat ok (%s)", resp.status)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                log.error("server rejected token (401)")
+                _stop.set()
+                return
+            log.warning("heartbeat failed: HTTP %s", exc.code)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("heartbeat failed: %s", exc)
+        _stop.wait(interval)
+
+
+def _start_supernode(
+    superlink: str, data_dir: Path, node_name: str | None, insecure: bool
+) -> subprocess.Popen:
+    """Launch supernode as a subprocess so the heartbeat thread can keep running.
+
+    `os.execvp` replaces the whole Python process and would kill the daemon
+    heartbeat thread. With Popen, this process stays alive: heartbeat in the
+    background, supernode in the foreground (we wait on it).
+    """
+    args = ["flower-supernode"]
+    if insecure:
+        args.append("--insecure")
+    args += ["--superlink", superlink]
+    nc = f'data-dir="{data_dir}"'
+    if node_name:
+        nc += f' node-name="{node_name}"'
+    args += ["--node-config", nc]
+    log.info("spawn: %s", " ".join(args))
+    return subprocess.Popen(args)
 
 
 def main() -> int:
     token = _require_env("FL_TOKEN")
     server_url = _require_env("FL_SERVER_URL").rstrip("/")
+    superlink = _require_env("FL_SUPERLINK")
+    data_dir = Path(os.environ.get("FL_DATA_DIR", "/data"))
     interval = int(os.environ.get("FL_HEARTBEAT_INTERVAL", DEFAULT_INTERVAL_SECONDS))
-
-    heartbeat_url = f"{server_url}/client/heartbeat"
-    log.info("starting fl-client heartbeat loop -> %s (every %ss)", heartbeat_url, interval)
+    insecure = os.environ.get("FL_INSECURE", "1") not in ("0", "false", "False")
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
-    while not _stop.is_set():
+    log.info("fetching project contract from %s", server_url)
+    try:
+        manifest = _fetch_contract(server_url, token)
+    except urllib.error.HTTPError as exc:
+        log.error("fetch contract failed: HTTP %s — %s", exc.code, exc.reason)
+        return 1
+    except Exception as exc:  # noqa: BLE001
+        log.error("fetch contract failed: %s", exc)
+        return 1
+
+    log.info(
+        "contract: project=%r num_classes=%s image=%sx%s",
+        manifest.get("project_name"),
+        manifest.get("num_classes"),
+        *(manifest.get("image_size") or [None, None]),
+    )
+
+    class_names = manifest.get("class_names") or []
+    if not class_names:
+        log.error("contract has no class_names — admin must run Analyze on the project")
+        return 1
+
+    _validate_local_data(data_dir, class_names)
+    _write_contract(data_dir, manifest)
+    log.info("wrote %s", data_dir / CONTRACT_FILENAME)
+
+    threading.Thread(
+        target=_heartbeat_loop,
+        args=(server_url, token, interval),
+        daemon=True,
+    ).start()
+
+    proc = _start_supernode(superlink, data_dir, manifest.get("node_name"), insecure)
+
+    # Forward signals so docker stop terminates supernode cleanly.
+    def _forward(sig: int, _frame: object) -> None:
+        log.info("forwarding signal %s to supernode", sig)
+        _stop.set()
         try:
-            status = _send_heartbeat(heartbeat_url, token)
-            log.info("heartbeat ok (%s)", status)
-        except urllib.error.HTTPError as exc:
-            if exc.code == 401:
-                log.error("server rejected token (401), exiting")
-                return 1
-            log.warning("heartbeat failed: HTTP %s", exc.code)
-        except urllib.error.URLError as exc:
-            log.warning("heartbeat failed: %s", exc.reason)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("heartbeat failed: %s", exc)
+            proc.send_signal(sig)
+        except Exception:
+            pass
 
-        _stop.wait(interval)
+    signal.signal(signal.SIGTERM, _forward)
+    signal.signal(signal.SIGINT, _forward)
 
-    log.info("fl-client stopped cleanly")
-    return 0
+    return proc.wait()
 
 
 if __name__ == "__main__":

@@ -53,6 +53,19 @@ export function cancelRun(projectId: number, runId: number): Promise<Run> {
   })
 }
 
+export function deleteRun(projectId: number, runId: number): Promise<void> {
+  return apiFetch<void>(`/projects/${projectId}/runs/${runId}`, {
+    method: 'DELETE',
+    auth: true,
+  })
+}
+
+export type RunEvent = Record<string, unknown> & { type: string }
+
+export function getRunEvents(projectId: number, runId: number): Promise<RunEvent[]> {
+  return apiFetch<RunEvent[]>(`/projects/${projectId}/runs/${runId}/events`, { auth: true })
+}
+
 export async function getRunLog(projectId: number, runId: number): Promise<string> {
   const response = await fetch(`/api/projects/${projectId}/runs/${runId}/log`, {
     headers: {

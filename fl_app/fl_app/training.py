@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 
 import torch
-from sklearn.metrics import f1_score
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -122,6 +121,8 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> dict
         total += y.size(0)
         ys.append(y.cpu()); ps.append(pred.cpu())
     y_all = torch.cat(ys).numpy(); p_all = torch.cat(ps).numpy()
+    from sklearn.metrics import f1_score
+
     num_classes = int(y_all.max()) + 1
     per_class = []
     for c in range(num_classes):

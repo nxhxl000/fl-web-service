@@ -11,10 +11,10 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from flwr.app import ArrayRecord, Context, Message, MetricRecord, RecordDict
+from flwr.app import ArrayRecord, ConfigRecord, Context, Message, MetricRecord, RecordDict
 from flwr.clientapp import ClientApp
 
-from fl_app.data import build_loader
+from fl_app.data import build_loader, load_contract
 from fl_app.models import build_model, get_hparams
 from fl_app.profiling import collect_data_profile
 from fl_app.training import get_device, local_train
@@ -22,7 +22,18 @@ from fl_app.training import get_device, local_train
 app = ClientApp()
 
 
-def _partition_dir(rc, node_config) -> Path:
+def _data_dir(rc, node_config) -> Path:
+    """Resolve this client's local data directory.
+
+    Prod: SuperNode is launched with `--node-config 'data-dir="..."'` (Docker
+    container has `/data` mounted; multi-cloud SSH bakes a per-VM path).
+
+    Sim fallback: Flower 1.28 hardcodes node_config to {partition-id,
+    num-partitions} in Ray-based sim — build path from rc + partition-id.
+    Sim is best-effort; the production path is the contract.
+    """
+    if "data-dir" in node_config:
+        return Path(str(node_config["data-dir"]))
     pid = int(node_config["partition-id"])
     return Path(rc.get("data-dir", "data/")) / "partitions" / rc["partition-name"] / f"client_{pid}"
 
@@ -52,21 +63,41 @@ def train(msg: Message, context: Context) -> Message:
     device = get_device()
     model = build_model(model_name)
 
-    pid = int(context.node_config["partition-id"])
+    # partition-id is sim-only (Ray injects it). In real distributed deployment
+    # the SuperNode is identified by context.node_id; downgrade to a small int
+    # for use as a synthetic index in straggler-mitigation arrays + metrics.
+    if "partition-id" in context.node_config:
+        pid = int(context.node_config["partition-id"])
+    else:
+        pid = int(context.node_id) % (1 << 31)
     cfg_in = msg.content["config"]
     excluded = str(cfg_in.get("excluded-clients", "") or rc.get("excluded-clients", "")).strip()
     if excluded and pid in {int(x) for x in excluded.split(",")}:
+        # Schema MUST идентично с обычным reply, иначе flwr InconsistentMessageReplies
+        excl_node_name = str(context.node_config.get("node-name", "") or "")
+        excl_info = (
+            ConfigRecord({"node-name": excl_node_name})
+            if excl_node_name
+            else ConfigRecord({})
+        )
         return Message(
             content=RecordDict({
                 "arrays": msg.content["arrays"],
                 "metrics": MetricRecord({
-                    "partition-id": float(pid),
-                    "num-examples": 0.0, "num-steps": 0.0,
-                    "train-loss-first": 0.0, "train-loss-last": 0.0,
-                    "t-compute": 0.0, "t-serialize": 0.0,
-                    "w-drift": 0.0,
-                    "update-norm-rel": 0.0, "grad-norm-last": 0.0,
+                    "partition-id":     float(pid),
+                    "num-examples":     0.0,
+                    "num-steps":        0.0,
+                    "train-loss-first": 0.0,
+                    "train-loss-last":  0.0,
+                    "t-compute":        0.0,
+                    "t-serialize":      0.0,
+                    "w-drift":          0.0,
+                    "update-norm-rel":  0.0,
+                    "grad-norm-last":   0.0,
+                    "chunk-fraction":   1.0,
+                    "local-epochs":     0.0,
                 }),
+                "node-info": excl_info,
             }),
             reply_to=msg,
         )
@@ -99,10 +130,13 @@ def train(msg: Message, context: Context) -> Message:
         if pid < len(parts_ep):
             epochs = parts_ep[pid]
     server_round = int(cfg.get("server-round", 0))
+    data_dir = _data_dir(rc, context.node_config)
+    contract = load_contract(data_dir if (data_dir / "_fl_contract.json").exists() else data_dir.parent)
     loader = build_loader(
-        _partition_dir(rc, context.node_config),
+        data_dir,
         batch_size=bs,
         train=True,
+        contract=contract,
         chunk_fraction=chunk_fraction,
         chunk_seed=server_round * 100 + pid,
     )
@@ -136,10 +170,16 @@ def train(msg: Message, context: Context) -> Message:
     # Round 1: класс-распределение для серверного подсчёта MPJS/Gini.
     # data_cls_{N} = число сэмплов класса N. Сервер фильтрует ключи перед aggregate.
     if server_round == 1:
-        metrics_dict.update(collect_data_profile(_partition_dir(rc, context.node_config)))
+        metrics_dict.update(collect_data_profile(data_dir, contract))
     metrics = MetricRecord(metrics_dict)
+    # `node-name` travels in a separate ConfigRecord — MetricRecord is float-only.
+    # Sim has no node-name; server falls back to `pid` for display in that case.
+    node_name = str(context.node_config.get("node-name", "") or "")
+    info = ConfigRecord({"node-name": node_name}) if node_name else ConfigRecord({})
     return Message(
-        content=RecordDict({"arrays": reply_arrays, "metrics": metrics}),
+        content=RecordDict(
+            {"arrays": reply_arrays, "metrics": metrics, "node-info": info}
+        ),
         reply_to=msg,
     )
 

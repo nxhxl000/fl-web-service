@@ -11,7 +11,7 @@ import type { User } from '../api/types'
 export type AuthContextValue = {
   user: User | null
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string) => Promise<User>
   logout: () => void
 }
 
@@ -42,6 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStoredToken(access_token)
     const me = await fetchMe()
     setUser(me)
+    return me
   }, [])
 
   const logout = useCallback(() => {

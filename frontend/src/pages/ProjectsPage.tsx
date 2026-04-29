@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ApiError } from '../api/client'
-import { createProject, listProjects } from '../api/projects'
+import { createProject, listJoinedProjectIds, listProjects } from '../api/projects'
 import type { Project } from '../api/types'
 import { useAuth } from '../auth/useAuth'
 import { ProjectFormModal } from '../components/ProjectFormModal'
@@ -9,6 +9,7 @@ import { ProjectFormModal } from '../components/ProjectFormModal'
 export function ProjectsPage() {
   const { user } = useAuth()
   const [projects, setProjects] = useState<Project[]>([])
+  const [joinedIds, setJoinedIds] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -26,6 +27,16 @@ export function ProjectsPage() {
   useEffect(() => {
     load()
   }, [])
+
+  useEffect(() => {
+    if (!user || user.is_admin) {
+      setJoinedIds(new Set())
+      return
+    }
+    listJoinedProjectIds()
+      .then((ids) => setJoinedIds(new Set(ids)))
+      .catch(() => undefined)
+  }, [user])
 
   return (
     <main className="px-8 py-10">
@@ -64,7 +75,7 @@ export function ProjectsPage() {
           {projects.map((p) => (
             <li
               key={p.id}
-              className="flex flex-col rounded border border-neutral-200 bg-white p-5 shadow-sm"
+              className="relative flex flex-col rounded border border-neutral-200 bg-white p-5 shadow-sm"
             >
               <h2 className="text-lg font-semibold text-neutral-900">{p.name}</h2>
               <p className="mt-3 flex-1 text-sm text-neutral-700">{p.summary}</p>
@@ -72,12 +83,28 @@ export function ProjectsPage() {
                 <div className="text-xs font-medium text-neutral-500">Requirements</div>
                 <div className="mt-1 text-sm text-neutral-700">{p.requirements}</div>
               </div>
-              <Link
-                to={`/projects/${p.id}`}
-                className="mt-4 inline-block rounded bg-neutral-900 px-4 py-2 text-center text-sm text-white hover:bg-neutral-700"
-              >
-                {user?.is_admin ? 'Open' : 'Join'}
-              </Link>
+              <div className="mt-4 flex items-end justify-between gap-3">
+                <Link
+                  to={`/projects/${p.id}`}
+                  className={
+                    'inline-block rounded px-4 py-2 text-center text-sm ' +
+                    (user?.is_admin || joinedIds.has(p.id)
+                      ? 'border border-neutral-900 text-neutral-900 hover:bg-neutral-100'
+                      : 'bg-neutral-900 text-white hover:bg-neutral-700')
+                  }
+                >
+                  {user?.is_admin
+                    ? 'Open'
+                    : joinedIds.has(p.id)
+                    ? 'Open project'
+                    : 'Join'}
+                </Link>
+                {!user?.is_admin && joinedIds.has(p.id) && (
+                  <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-800">
+                    Already joined
+                  </span>
+                )}
+              </div>
             </li>
           ))}
         </ul>

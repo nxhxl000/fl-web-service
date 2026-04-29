@@ -17,6 +17,17 @@ dependencies = [
     "email-validator>=2.1",
     "bcrypt>=4.1",
     "pyjwt>=2.8",
+    # Inference + FL training stack (orchestrator spawns `flwr run fl_app/`).
+    # Versions pinned to match the experiment venv in the flwr-репо so trained
+    # weights load byte-identically here. Install torch via the nightly cu128
+    # index (see README); pyproject can't express the URL.
+    "pillow>=10.0",
+    "torch>=2.11",
+    "torchvision>=0.26",
+    "timm>=0.9",
+    "datasets>=2.0",
+    "scikit-learn>=1.8",
+    "flwr[simulation]>=1.28.0",
 ]
 
 [project.optional-dependencies]

@@ -11,6 +11,7 @@ from backend.auth import models as _auth_models  # noqa: F401
 from backend.projects import models as _project_models  # noqa: F401
 from backend.clients import models as _client_models  # noqa: F401
 from backend.runs import models as _run_models  # noqa: F401
+from backend.trained_models import models as _trained_model_models  # noqa: F401
 
 config = context.config
 

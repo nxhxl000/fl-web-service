@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["fl_app", "scripts"]
+packages = ["fl_app"]
 
 [tool.flwr.app]
 publisher = "nxhxl"
@@ -46,7 +46,7 @@ clientapp = "fl_app.client_app:app"
 # -----------------------------------------------------
 [tool.flwr.app.config]
 # Что запускать
-partition-name = "cifar100__dirichlet__a0.6__m0__n10__s42"
+partition-name = "cifar100__iid__n10__s42"
 model          = "wrn_16_4"   # wrn_16_4 | se_resnet | effnet_b0
 aggregation    = "fedavg"     # fedavg | fedavgm | fedprox | scaffold | fednova | fednovam
 
@@ -74,12 +74,24 @@ straggler-min-epochs     = 1      # нижний предел local_epochs в ep
 # Пути
 data-dir        = "data/"
 experiments-dir = "simulation"   # simulation | experiments
+output-dir      = ""              # пусто → ad-hoc layout по timestamp; orchestrator перебивает на runs_data/run_<id>
 
 # Параметры стратегий (игнорируются неподходящими)
 proximal-mu       = 0.0005  # FedProx (tuned на α=0.2: μ=0.0005 даёт +0.57 пп vs FedAvg)
 server-momentum   = 0.5    # FedAvgM / FedNovaM
 server-lr         = 1.0    # FedAvgM / FedNovaM
 fedprox-client-lr = 0.1    # FedProx (дефолт = базовый client-lr; override через --run-config)
+
+# Гиперпараметры обучения. Объявление в этом блоке делает их override'абельными
+# через --run-config (требование flwr 1.28). Дефолты — wrn_16_4-friendly; UI всегда
+# передаёт актуальные значения из формы.
+local-epochs        = 3
+client-lr           = 0.03
+client-momentum     = 0.9
+client-weight-decay = 0.0005
+batch-size          = 64
+optimizer           = "sgd"
+chunk-fraction      = 1.0
 
 
 #######################################################################

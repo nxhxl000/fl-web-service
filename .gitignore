@@ -84,11 +84,13 @@ minio-data/
 /runs_data/
 /wandb/
 /exp/
+/inference_models/
 mlruns/
 *.pt
 *.pth
 *.ckpt
 *.onnx
+*.png
 *.h5
 datasets/
 *.tar.gz

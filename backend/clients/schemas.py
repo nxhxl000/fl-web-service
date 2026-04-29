@@ -18,6 +18,7 @@ class ClientTokenOut(BaseModel):
 
 class ClientTokenCreated(ClientTokenOut):
     token: str
+    docker_command: str
 
 
 class ClientTokenWithOwnerOut(BaseModel):

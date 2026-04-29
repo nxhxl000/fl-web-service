@@ -10,6 +10,27 @@ export type TokenResponse = {
   token_type: string
 }
 
+export type TrainedModelInline = {
+  id: number
+  display_name: string
+  model_name: string
+  dataset: string
+  accuracy: number | null
+  f1_score: number | null
+}
+
+export type DatasetInfo = {
+  name: string
+  format: string
+  num_samples: number
+  num_classes: number
+  class_names: string[]
+  label_column: string | null
+  image_column: string | null
+  image_size: [number, number] | null
+  image_mode: string | null
+}
+
 export type Project = {
   id: number
   name: string
@@ -17,6 +38,13 @@ export type Project = {
   description: string
   requirements: string
   created_at: string
+  inference_target_id: number | null
+  inference_target: TrainedModelInline | null
+  test_dataset_info: DatasetInfo | null
+}
+
+export type ProjectAdmin = Project & {
+  test_dataset_path: string | null
 }
 
 export type ProjectCreate = {
@@ -37,6 +65,7 @@ export type ClientToken = {
 
 export type ClientTokenCreated = ClientToken & {
   token: string
+  docker_command: string
 }
 
 export type ClientTokenWithOwner = {

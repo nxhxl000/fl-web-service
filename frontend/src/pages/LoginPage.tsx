@@ -19,8 +19,8 @@ export function LoginPage() {
     setError(null)
     setSubmitting(true)
     try {
-      await login(email, password)
-      navigate('/projects')
+      const me = await login(email, password)
+      navigate(me.is_admin ? '/projects' : '/')
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.detail)

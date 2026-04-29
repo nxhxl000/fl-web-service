@@ -10,11 +10,25 @@ from backend.clients.service import (
     delete_client_token,
     list_user_tokens_in_project,
 )
+from backend.config import get_settings
 from backend.db import get_db
 from backend.projects.deps import get_project_or_404
 from backend.projects.models import Project
 
 router = APIRouter(prefix="/projects/{project_id}/tokens", tags=["client tokens"])
+
+
+def _build_docker_command(token: str) -> str:
+    s = get_settings()
+    # Multi-line for readability when participant pastes into a terminal.
+    return (
+        f"docker run -d --rm \\\n"
+        f"  -e FL_TOKEN={token} \\\n"
+        f"  -e FL_SERVER_URL={s.public_server_url} \\\n"
+        f"  -e FL_SUPERLINK={s.public_superlink_addr} \\\n"
+        f"  -v /PATH/TO/YOUR/DATA:/data \\\n"
+        f"  {s.fl_client_image}"
+    )
 
 
 @router.post("", response_model=ClientTokenCreated, status_code=status.HTTP_201_CREATED)
@@ -31,6 +45,7 @@ def create_token(
         created_at=record.created_at,
         last_seen_at=record.last_seen_at,
         token=plaintext,
+        docker_command=_build_docker_command(plaintext),
     )
 
 
