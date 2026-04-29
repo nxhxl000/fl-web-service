@@ -58,7 +58,6 @@ import {
   STRAGGLER_PARAM_DEFAULTS,
   STRAGGLER_PARAM_LABELS,
   STRAGGLER_PARAM_RANGES,
-  type StragglerMode,
   type StragglerNumericKey,
   type StragglerParams,
   type StragglerTarget,
@@ -126,15 +125,6 @@ function DatasetSpecs({ info }: { info: NonNullable<Project['test_dataset_info']
   )
 }
 
-
-function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4 border-b border-neutral-100 pb-1 last:border-b-0">
-      <dt className="text-xs uppercase tracking-wide text-neutral-500">{label}</dt>
-      <dd className={mono ? 'font-mono text-neutral-900' : 'text-neutral-900'}>{value}</dd>
-    </div>
-  )
-}
 
 const READY_THRESHOLD_MS = 90 * 1000
 
