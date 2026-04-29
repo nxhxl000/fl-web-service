@@ -272,7 +272,7 @@ def main(grid: Grid, context: Context) -> None:
     strategy = with_dynamic_schedule(strategy)
     strategy.train_metrics_aggr_fn = train_aggr
 
-    best = {"acc": -1.0, "f1": 0.0, "loss": 0.0, "round": 0, "arrays": None}
+    best = {"acc": -1.0, "f1": 0.0, "loss": 0.0, "round": 0, "state_dict": None}
 
     def eval_fn(server_round: int, arrays: ArrayRecord):
         m = build_model(model_name)
@@ -283,7 +283,11 @@ def main(grid: Grid, context: Context) -> None:
             best["f1"] = r["f1_macro"]
             best["loss"] = r["loss"]
             best["round"] = server_round
-            best["arrays"] = arrays
+            # Snapshot weights as plain detached torch tensors. Holding the
+            # ArrayRecord here would pin the underlying flwr gRPC stream
+            # buffer for the rest of the run — that's the deployment-mode
+            # leak that didn't show in sim (Ray passes by reference).
+            best["state_dict"] = {k: v.detach().clone() for k, v in m.state_dict().items()}
 
         # Initial eval (round 0) and post-final eval — don't emit a "round" event
         if server_round == 0 or server_round > num_rounds:
@@ -352,9 +356,9 @@ def main(grid: Grid, context: Context) -> None:
     # Save best-model checkpoint + per-class accuracy
     model_best_path = exp_dir / "model_best.pt"
     per_class: list[dict] = []
-    if best["arrays"] is not None:
+    if best["state_dict"] is not None:
         bm = build_model(model_name)
-        bm.load_state_dict(best["arrays"].to_torch_state_dict(), strict=True)
+        bm.load_state_dict(best["state_dict"], strict=True)
         torch.save(bm.state_dict(), model_best_path)
         br = evaluate(bm, test_loader, device)
         contract_names = contract.get("class_names") or []

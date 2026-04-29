@@ -83,8 +83,17 @@ class RunOrchestrator:
     ) -> tuple[int, Path, Path]:
         cmd, output_dir = build_command(run_id, federation, run_config)
         output_dir.mkdir(parents=True, exist_ok=True)
+        contract_blob = json.dumps(contract, indent=2)
         contract_path = output_dir / "_fl_contract.json"
-        contract_path.write_text(json.dumps(contract, indent=2))
+        contract_path.write_text(contract_blob)
+        # Sim clients (Ray-spawned) read the contract from `data_dir.parent`,
+        # which resolves to data/partitions/<partition>/. Drop a copy there
+        # so the sim path works without mutating the partition tree itself.
+        partition_name = run_config.get("partition-name")
+        if partition_name:
+            sim_root = REPO_ROOT / "data" / "partitions" / str(partition_name)
+            if sim_root.is_dir():
+                (sim_root / "_fl_contract.json").write_text(contract_blob)
         log_path = output_dir / "stdout.log"
         log_file = log_path.open("ab")
         log.info("starting run %s: %s", run_id, " ".join(cmd))
