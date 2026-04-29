@@ -138,6 +138,29 @@ def _heartbeat_loop(server_url: str, token: str, interval: int) -> None:
         _stop.wait(interval)
 
 
+def _print_welcome_banner(*, project_name: str, node_name: str, num_classes: int) -> None:
+    """Friendly status block shown right after the contract is verified.
+
+    Goes to stderr/stdout via plain `print()` (not the logger) so the box
+    stays intact regardless of log format. Helps non-technical participants
+    confirm they actually joined.
+    """
+    line = "=" * 78
+    print()
+    print(line, flush=True)
+    print(f"  ✓ Successfully joined project '{project_name}'", flush=True)
+    print(f"    You are connected as '{node_name}'.", flush=True)
+    print(f"    {num_classes} classes from your dataset are recognized.", flush=True)
+    print()
+    print("    • Keep this container running.", flush=True)
+    print("    • Do NOT stop it during training — that drops you from the round.", flush=True)
+    print("    • Your data never leaves this machine; only model updates are shared.", flush=True)
+    print()
+    print("    Thank you for contributing your compute!", flush=True)
+    print(line, flush=True)
+    print(flush=True)
+
+
 def _start_supernode(
     superlink: str, data_dir: Path, node_name: str | None, insecure: bool
 ) -> subprocess.Popen:
@@ -195,6 +218,12 @@ def main() -> int:
     _validate_local_data(data_dir, class_names)
     _write_contract(data_dir, manifest)
     log.info("wrote %s", data_dir / CONTRACT_FILENAME)
+
+    _print_welcome_banner(
+        project_name=str(manifest.get("project_name") or "FL project"),
+        node_name=str(manifest.get("node_name") or "client"),
+        num_classes=int(manifest.get("num_classes") or 0),
+    )
 
     threading.Thread(
         target=_heartbeat_loop,
