@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import signal
 import subprocess
@@ -122,12 +123,18 @@ class RunOrchestrator:
         log_path = output_dir / "stdout.log"
         log_file = log_path.open("ab")
         log.info("starting run %s: %s", run_id, " ".join(cmd))
+        # PYTHONUNBUFFERED forces line-flush — without it, Python pipes its
+        # stdout in 4KB chunks when redirected to a file and we see almost
+        # nothing in stdout.log for the entire run. Critical for debugging
+        # mid-run hangs (e.g., serverapp waiting on a stuck client).
+        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
         process = subprocess.Popen(
             cmd,
             stdout=log_file,
             stderr=subprocess.STDOUT,
             cwd=REPO_ROOT,
             start_new_session=True,
+            env=env,
         )
         with self._lock:
             self._processes[run_id] = (process, federation, log_path)

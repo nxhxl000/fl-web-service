@@ -69,6 +69,39 @@ def main(grid: Grid, context: Context) -> None:
         line = json.dumps(event, default=str)
         with events_path.open("a") as f:
             f.write(line + "\n")
+        # Mirror a one-line summary to stdout so live tail of stdout.log makes
+        # progress visible. Combined with PYTHONUNBUFFERED=1 in the orchestrator
+        # this gives realtime debug of where each round is.
+        t = event.get("type")
+        if t == "run_started":
+            print(f"[event] run_started", flush=True)
+        elif t == "round":
+            r = event.get("round")
+            ta = event.get("test_acc", 0)
+            tl = event.get("test_loss", 0)
+            tcm = event.get("t_compute_mean", 0)
+            print(
+                f"[event] round={r} test_acc={ta:.4f} test_loss={tl:.4f} "
+                f"t_compute_mean={tcm:.1f}s",
+                flush=True,
+            )
+        elif t == "run_done":
+            ba = event.get("best_acc")
+            br = event.get("best_round")
+            rc_done = event.get("rounds_completed")
+            print(f"[event] run_done best_acc={ba} @r{br} rounds={rc_done}", flush=True)
+        elif t == "schedule":
+            print(
+                f"[event] schedule mode={event.get('mode')} "
+                f"T_target={event.get('T_target', 0):.1f}s T_upper={event.get('T_upper', 0):.1f}s",
+                flush=True,
+            )
+        elif t == "data_heterogeneity":
+            print(
+                f"[event] data_het MPJS={event.get('mpjs', 0):.3f} "
+                f"Gini={event.get('gini_quantity', 0):.3f}",
+                flush=True,
+            )
 
     _emit({"type": "run_started", "ts": time.time(), "config": dict(rc)})
 
