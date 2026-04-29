@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import signal
 import subprocess
 import sys
@@ -67,11 +68,35 @@ def build_command(
     return cmd, output_dir
 
 
+_FLWR_RUN_ID_RE = re.compile(r"Successfully started run (\d+)")
+
+
+def _parse_flwr_run_id(stdout_log: Path) -> int | None:
+    """Find SuperLink-side run id from `flwr run --stream` output.
+
+    The CLI prints "🎊 Successfully started run <id>" on its first stdout line
+    once the SuperLink has accepted the run. We need this id to call `flwr stop`
+    and tell SuperLink to abort, which also clears it from state.db.
+    """
+    if not stdout_log.exists():
+        return None
+    try:
+        with stdout_log.open(errors="replace") as f:
+            for line in f:
+                m = _FLWR_RUN_ID_RE.search(line)
+                if m:
+                    return int(m.group(1))
+    except OSError:
+        return None
+    return None
+
+
 class RunOrchestrator:
     def __init__(self, runs_data_dir: Path) -> None:
         self._runs_data_dir = runs_data_dir
         self._runs_data_dir.mkdir(parents=True, exist_ok=True)
-        self._processes: dict[int, subprocess.Popen[bytes]] = {}
+        # Map our internal run id → (process, federation, stdout_log path)
+        self._processes: dict[int, tuple[subprocess.Popen[bytes], str, Path]] = {}
         self._lock = threading.Lock()
 
     def start(
@@ -105,7 +130,7 @@ class RunOrchestrator:
             start_new_session=True,
         )
         with self._lock:
-            self._processes[run_id] = process
+            self._processes[run_id] = (process, federation, log_path)
         threading.Thread(
             target=self._wait_and_finalize,
             args=(run_id, process, log_file),
@@ -126,10 +151,33 @@ class RunOrchestrator:
             finalize_run(db, run_id, exit_code)
 
     def cancel(self, run_id: int) -> bool:
+        """Cancel a running flwr submission.
+
+        Two-step: (1) ask SuperLink to abort via `flwr stop` so the run is
+        removed from state.db (otherwise SuperLink resumes it on next restart);
+        (2) SIGTERM the local `flwr run --stream` wrapper.
+        """
         with self._lock:
-            process = self._processes.get(run_id)
-        if process is None:
+            entry = self._processes.get(run_id)
+        if entry is None:
             return False
+        process, federation, stdout_log = entry
+
+        flwr_run_id = _parse_flwr_run_id(stdout_log)
+        if flwr_run_id is not None:
+            try:
+                subprocess.run(
+                    [_flwr_bin(), "stop", str(flwr_run_id), federation],
+                    cwd=REPO_ROOT,
+                    timeout=10,
+                    capture_output=True,
+                )
+                log.info("flwr stop %s on federation %s sent", flwr_run_id, federation)
+            except (subprocess.TimeoutExpired, OSError) as e:
+                log.warning("flwr stop failed for %s: %s", flwr_run_id, e)
+        else:
+            log.warning("could not parse flwr_run_id for %s; SuperLink state may persist", run_id)
+
         try:
             process.send_signal(signal.SIGTERM)
         except ProcessLookupError:
@@ -138,8 +186,11 @@ class RunOrchestrator:
 
     def is_alive(self, run_id: int) -> bool:
         with self._lock:
-            process = self._processes.get(run_id)
-        return process is not None and process.poll() is None
+            entry = self._processes.get(run_id)
+        if entry is None:
+            return False
+        process, _, _ = entry
+        return process.poll() is None
 
 
 _orchestrator: RunOrchestrator | None = None
