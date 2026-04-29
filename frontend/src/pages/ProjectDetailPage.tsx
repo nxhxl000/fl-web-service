@@ -1236,17 +1236,15 @@ export function ProjectDetailPage() {
                   ? `Run #${currentRun.id} — ${currentRun.status}${
                       currentRun.status === 'running' ? ' (polling every 5s)' : ''
                     }`
-                  : 'No active run yet. The placeholder below shows what charts look like.'}
+                  : 'No active run yet. Configure the run above and click Start Training.'}
               </p>
               <div className="mt-6">
-                {currentRun ? (
+                {currentRun && (
                   <TrainingDashboard
                     data={runExperiment}
                     loading={runExperimentLoading}
                     error={runExperimentError}
                   />
-                ) : (
-                  <TrainingDashboard />
                 )}
               </div>
             </section>
