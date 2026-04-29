@@ -81,7 +81,7 @@ export function TrainingDashboard({ data: externalData, loading, error: external
       <ChartCard title="Straggler mitigation: round 1 vs rounds 2+">
         <StragglerComparison clients={data.clients} rounds={data.rounds} />
       </ChartCard>
-      {data.summary.per_class_accuracy.length > 0 && (
+      {(data.summary.per_class_accuracy?.length ?? 0) > 0 && (
         <ChartCard title="Per-class accuracy (best model on test set)">
           <PerClassAccuracyHeatmap rows={data.summary.per_class_accuracy} />
         </ChartCard>
@@ -131,7 +131,7 @@ function RunHeader({ data }: { data: SampleExperiment }) {
         <div className="flex flex-wrap gap-3 text-xs">
           <Pill label="Rounds" value={`${data.summary.rounds_completed} / ${data.summary.num_rounds}`} />
           <Pill label="Best acc" value={`${(data.summary.best_acc * 100).toFixed(1)}% @ r${data.summary.best_round}`} />
-          {startTs !== null && (
+          {startTs != null && (
             <>
               <Pill label="Elapsed" value={formatDuration(elapsed)} />
               <Pill label="Avg round" value={completed > 0 ? formatDuration(avgRound) : '—'} />
