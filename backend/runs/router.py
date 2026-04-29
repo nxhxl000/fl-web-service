@@ -213,11 +213,28 @@ def cancel_one_run(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot cancel a run in status {run.status!r}",
         )
-    if not get_orchestrator().cancel(run.id):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Process is not tracked by this server (likely lost on restart)",
+
+    # Best-effort: ask the orchestrator to send `flwr stop` + SIGTERM. If the
+    # backend was restarted since the run started, the orchestrator no longer
+    # tracks the process — but we still want to mark the row cancelled so the
+    # user isn't stuck on a phantom "running" status. As a fallback, try to
+    # parse the flwr_run_id from the log file and call `flwr stop` directly.
+    if not get_orchestrator().cancel(run.id) and run.exp_dir:
+        import subprocess as _sp
+        from backend.runs.orchestrator import (
+            _parse_flwr_run_id, _flwr_bin, REPO_ROOT,
         )
+        log_path = Path(run.exp_dir) / "stdout.log"
+        flwr_run_id = _parse_flwr_run_id(log_path)
+        if flwr_run_id is not None:
+            try:
+                _sp.run(
+                    [_flwr_bin(), "stop", str(flwr_run_id), run.federation],
+                    cwd=REPO_ROOT, timeout=10, capture_output=True,
+                )
+            except (_sp.TimeoutExpired, OSError):
+                pass  # best-effort; mark cancelled regardless
+
     return mark_run_cancelled(db, run)
 
 
