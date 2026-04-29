@@ -193,7 +193,7 @@ def main(grid: Grid, context: Context) -> None:
 
             # Data heterogeneity (round 1 only)
             if server_round == 1 and class_counts_by_pid:
-                num_classes_d = {"cifar100": 100, "plantvillage": 38}.get(dataset_name, 10)
+                num_classes_d = len(contract.get("class_names") or [])
                 dists = [class_counts_by_pid[p] for p in sorted(class_counts_by_pid.keys())]
                 mpjs = _mean_pairwise_js(dists, num_classes_d)
                 gini_q = _gini_sizes(dists)

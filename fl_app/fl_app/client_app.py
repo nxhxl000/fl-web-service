@@ -116,19 +116,27 @@ def train(msg: Message, context: Context) -> Message:
     lr = lr * float(cfg.get("lr-scale", 1.0))
 
     # per-client-chunks: cfg (per-round, динамический schedule) → rc (статика) → дефолт
+    # Sparse map format `pid:chunk;pid:chunk` — keeps the config string small
+    # regardless of pid magnitude (real Flower node IDs are huge).
     per_client = str(cfg.get("per-client-chunks", "") or rc.get("per-client-chunks", "")).strip()
+    chunk_fraction = float(_hp(rc, model_hp, agg, "chunk-fraction", 1.0))
     if per_client:
-        parts = [float(x) for x in per_client.split(",")]
-        chunk_fraction = parts[pid] if pid < len(parts) else 1.0
-    else:
-        chunk_fraction = float(_hp(rc, model_hp, agg, "chunk-fraction", 1.0))
+        for tok in per_client.split(";"):
+            if ":" in tok:
+                k, v = tok.split(":", 1)
+                if int(k) == pid:
+                    chunk_fraction = float(v)
+                    break
 
-    # per-client-epochs: аналогично, override локального epochs если задано в cfg/rc
+    # per-client-epochs: same sparse format
     per_client_ep = str(cfg.get("per-client-epochs", "") or rc.get("per-client-epochs", "")).strip()
     if per_client_ep:
-        parts_ep = [int(x) for x in per_client_ep.split(",")]
-        if pid < len(parts_ep):
-            epochs = parts_ep[pid]
+        for tok in per_client_ep.split(";"):
+            if ":" in tok:
+                k, v = tok.split(":", 1)
+                if int(k) == pid:
+                    epochs = int(v)
+                    break
     server_round = int(cfg.get("server-round", 0))
     data_dir = _data_dir(rc, context.node_config)
     contract = load_contract(data_dir if (data_dir / "_fl_contract.json").exists() else data_dir.parent)

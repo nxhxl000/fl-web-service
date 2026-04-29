@@ -25,17 +25,21 @@ class Schedule:
     epochs: dict[int, int]   = field(default_factory=dict)
     excluded: list[int]      = field(default_factory=list)   # pids для drop-mode
 
-    def _num_pids(self) -> int:
-        return (max(self.chunks.keys()) + 1) if self.chunks else 0
-
     def chunks_str(self) -> str:
-        """'c0,c1,c2,...' для per-client-chunks (positional, по pid)."""
-        n = self._num_pids()
-        return ",".join(f"{self.chunks.get(p, 1.0):.4f}" for p in range(n)) if n else ""
+        """'pid:chunk;pid:chunk;...' — sparse map.
+
+        Positional formats explode when pids are real Flower node IDs (~2^31)
+        and gets shipped through every dispatch message: a multi-GB string
+        per round per client. Sparse keeps it tiny regardless of pid magnitude.
+        """
+        if not self.chunks:
+            return ""
+        return ";".join(f"{p}:{c:.4f}" for p, c in self.chunks.items())
 
     def epochs_str(self) -> str:
-        n = self._num_pids()
-        return ",".join(f"{self.epochs.get(p, self.base_epochs)}" for p in range(n)) if n else ""
+        if not self.epochs:
+            return ""
+        return ";".join(f"{p}:{e}" for p, e in self.epochs.items())
 
     def excluded_str(self) -> str:
         return ",".join(str(p) for p in sorted(self.excluded))
