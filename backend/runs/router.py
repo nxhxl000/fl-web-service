@@ -66,6 +66,33 @@ def get_one_run(
     return run
 
 
+_HEARTBEAT_FRESH_S = 90      # client is "online" if heartbeat ≤ 90 seconds old
+_SUPERLINK_CONTROL_PORT = 9093
+_SUPERLINK_FLEET_PORT = 9092
+
+
+def _tcp_alive(host: str, port: int, timeout: float = 2.0) -> bool:
+    """Quick TCP socket probe — returns True if port is accepting connections."""
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _online_client_tokens(db: Session, project_id: int) -> int:
+    """Count tokens that heartbeated within the freshness window."""
+    from datetime import datetime, timedelta, timezone
+    from backend.clients.models import ClientToken
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=_HEARTBEAT_FRESH_S)
+    return db.query(ClientToken).filter(
+        ClientToken.project_id == project_id,
+        ClientToken.last_seen_at >= cutoff,
+    ).count()
+
+
 @router.post("/{run_id}/start", response_model=RunOut)
 def start_run(
     run: Run = Depends(get_run_or_404),
@@ -78,18 +105,26 @@ def start_run(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot start a run in status {run.status!r}",
         )
-    # Inject partition-name from the project's analyzed test dataset.
-    # The UI form doesn't expose `partition-name` (per project deployment policy);
-    # without injection flwr falls back to the pyproject default, which can mismatch
-    # the model's class count and trigger CUDA assert at eval time.
-    effective_rc = dict(run.run_config or {})
-    info = project.test_dataset_info or {}
-    partition_name = info.get("name")
-    if partition_name and "partition-name" not in effective_rc:
-        effective_rc["partition-name"] = partition_name
 
-    # Project contract for the training subprocess (server_app + sim clients).
-    # Real Docker clients fetch the same shape from /client/dataset-manifest.
+    # Pre-flight checks. Failing fast here is much friendlier than letting the
+    # subprocess hang or OOM the box.
+
+    # 1. Single concurrent run across the whole DB (orchestrator handles many in
+    # principle, but SuperLink + supernode pool are shared resources).
+    other = db.query(Run).filter(
+        Run.id != run.id, Run.status == "running"
+    ).first()
+    if other is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Another run is already running (#{other.id} in project "
+                f"#{other.project_id}). Cancel it before starting a new one."
+            ),
+        )
+
+    # 2. Dataset must have been analyzed.
+    info = project.test_dataset_info or {}
     if not info.get("class_names"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -100,6 +135,54 @@ def start_run(
             status_code=status.HTTP_409_CONFLICT,
             detail="Project has no test dataset path — run Analyze first.",
         )
+
+    rc = dict(run.run_config or {})
+    min_train = int(rc.get("min-train-nodes", 1))
+    min_avail = int(rc.get("min-available-nodes", 1))
+    if min_train < 1 or min_avail < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="min-train-nodes and min-available-nodes must be ≥ 1.",
+        )
+
+    # 3. For remote federation: SuperLink must be reachable + enough clients
+    # heartbeating. (local-sim auto-spawns its own SuperLink — skip the probe.)
+    if run.federation == "remote":
+        if not _tcp_alive("127.0.0.1", _SUPERLINK_CONTROL_PORT):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    f"SuperLink Control API is not responding on "
+                    f"127.0.0.1:{_SUPERLINK_CONTROL_PORT}. Make sure the SuperLink is running."
+                ),
+            )
+        if not _tcp_alive("127.0.0.1", _SUPERLINK_FLEET_PORT):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    f"SuperLink Fleet API is not responding on "
+                    f"127.0.0.1:{_SUPERLINK_FLEET_PORT}. Clients cannot connect."
+                ),
+            )
+        online = _online_client_tokens(db, project.id)
+        if online < min_train:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Only {online} client(s) heartbeating within "
+                    f"{_HEARTBEAT_FRESH_S}s; min-train-nodes={min_train} required. "
+                    "Start the missing clients (or lower the threshold) before launching."
+                ),
+            )
+
+    # Inject partition-name from the project's analyzed test dataset.
+    # The UI form doesn't expose `partition-name` (per project deployment policy);
+    # without injection flwr falls back to the pyproject default, which can mismatch
+    # the model's class count and trigger CUDA assert at eval time.
+    effective_rc = dict(run.run_config or {})
+    partition_name = info.get("name")
+    if partition_name and "partition-name" not in effective_rc:
+        effective_rc["partition-name"] = partition_name
     from backend.projects.dataset_analyzer import REPO_ROOT
 
     test_path = Path(project.test_dataset_path)

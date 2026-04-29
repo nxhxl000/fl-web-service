@@ -231,21 +231,39 @@ def main() -> int:
         daemon=True,
     ).start()
 
-    proc = _start_supernode(superlink, data_dir, manifest.get("node_name"), insecure)
+    # Supernode supervision loop: when the SuperLink restarts (or any other
+    # transient gRPC failure), flower-supernode exits. We restart it instead of
+    # letting the container die — keeps the federation stable across server
+    # restarts without depending on Docker --restart.
+    current_proc: list[subprocess.Popen | None] = [None]
 
-    # Forward signals so docker stop terminates supernode cleanly.
     def _forward(sig: int, _frame: object) -> None:
-        log.info("forwarding signal %s to supernode", sig)
+        log.info("forwarding signal %s, shutting down supervisor", sig)
         _stop.set()
-        try:
-            proc.send_signal(sig)
-        except Exception:
-            pass
+        p = current_proc[0]
+        if p is not None:
+            try:
+                p.send_signal(sig)
+            except Exception:
+                pass
 
     signal.signal(signal.SIGTERM, _forward)
     signal.signal(signal.SIGINT, _forward)
 
-    return proc.wait()
+    backoff_s = 5
+    while not _stop.is_set():
+        proc = _start_supernode(superlink, data_dir, manifest.get("node_name"), insecure)
+        current_proc[0] = proc
+        rc = proc.wait()
+        current_proc[0] = None
+        if _stop.is_set():
+            return rc
+        log.warning(
+            "supernode exited (code=%s); restarting in %ss — likely SuperLink restart or transient gRPC error",
+            rc, backoff_s,
+        )
+        _stop.wait(backoff_s)
+    return 0
 
 
 if __name__ == "__main__":

@@ -1138,6 +1138,28 @@ export function ProjectDetailPage() {
                 )}
               </div>
 
+              {runError && (
+                <div className="mt-6 flex items-start gap-3 rounded border border-red-300 bg-red-50 p-4">
+                  <span className="mt-0.5 text-xl leading-none text-red-600">⚠</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-red-900">
+                      Cannot start the run
+                    </p>
+                    <p className="mt-1 whitespace-pre-line text-sm text-red-800">
+                      {runError}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRunError(null)}
+                    className="text-red-700 hover:text-red-900"
+                    aria-label="Dismiss error"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
               <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded border border-neutral-200 bg-white p-6">
                 <div className="text-sm">
                   {Object.keys(errors).length > 0 ? (
@@ -1145,8 +1167,6 @@ export function ProjectDetailPage() {
                       Fix {Object.keys(errors).length} error
                       {Object.keys(errors).length > 1 ? 's' : ''} above before saving.
                     </span>
-                  ) : runError ? (
-                    <span className="text-red-600">{runError}</span>
                   ) : currentRun?.status === 'running' ? (
                     <span className="text-blue-700">
                       Run #{currentRun.id} is running (pid {currentRun.pid}).

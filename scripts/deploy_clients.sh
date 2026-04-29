@@ -77,7 +77,7 @@ set -e
 docker stop fl-client 2>/dev/null || true
 docker rm fl-client 2>/dev/null || true
 docker pull ${IMAGE} >/dev/null
-docker run -d --rm --name fl-client \\
+docker run -d --name fl-client --restart unless-stopped \\
   -e FL_TOKEN=${TOKEN} \\
   -e FL_SERVER_URL=${SERVER_URL} \\
   -e FL_SUPERLINK=${SUPERLINK_ADDR} \\
