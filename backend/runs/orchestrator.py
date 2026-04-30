@@ -112,6 +112,13 @@ class RunOrchestrator:
         contract_blob = json.dumps(contract, indent=2)
         contract_path = output_dir / "_fl_contract.json"
         contract_path.write_text(contract_blob)
+        # Snapshot of the actual run-config sent to `flwr run`, including
+        # backend injections (partition-name, output-dir). Read by the UI
+        # "View training config" button.
+        effective_rc = dict(run_config)
+        effective_rc["output-dir"] = str(output_dir)
+        config_path = output_dir / "_run_config.json"
+        config_path.write_text(json.dumps(effective_rc, indent=2, sort_keys=True))
         # Sim clients (Ray-spawned) read the contract from `data_dir.parent`,
         # which resolves to data/partitions/<partition>/. Drop a copy there
         # so the sim path works without mutating the partition tree itself.

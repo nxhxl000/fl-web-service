@@ -71,6 +71,29 @@ _SUPERLINK_CONTROL_PORT = 9093
 _SUPERLINK_FLEET_PORT = 9092
 
 
+# Mirror of `frontend/src/api/flStrategies.ts:STRATEGY_SPECIFIC_KEYS`. Defense
+# in depth: drop strategy-gated keys that don't belong to the chosen aggregation
+# (e.g. proximal-mu when aggregation=fedavgm). Catches stale values left over
+# in saved drafts from older form versions.
+_STRATEGY_GATED_KEYS = {"server-momentum", "server-lr", "proximal-mu"}
+_STRATEGY_SPECIFIC: dict[str, set[str]] = {
+    "fedavg":   set(),
+    "fedavgm":  {"server-momentum", "server-lr"},
+    "fedprox":  {"proximal-mu"},
+    "fednovam": {"server-momentum", "server-lr"},
+}
+
+
+def _sanitize_run_config(rc: dict[str, Any], aggregation: str) -> dict[str, Any]:
+    """Drop strategy-gated keys that don't apply to `aggregation`."""
+    agg = (aggregation or "").lower()
+    allowed = _STRATEGY_SPECIFIC.get(agg, set())
+    return {
+        k: v for k, v in rc.items()
+        if k not in _STRATEGY_GATED_KEYS or k in allowed
+    }
+
+
 def _tcp_alive(host: str, port: int, timeout: float = 2.0) -> bool:
     """Quick TCP socket probe — returns True if port is accepting connections."""
     import socket
@@ -183,6 +206,7 @@ def start_run(
     partition_name = info.get("name")
     if partition_name and "partition-name" not in effective_rc:
         effective_rc["partition-name"] = partition_name
+    effective_rc = _sanitize_run_config(effective_rc, str(effective_rc.get("aggregation", "")))
     from backend.projects.dataset_analyzer import REPO_ROOT
 
     test_path = Path(project.test_dataset_path)
@@ -249,6 +273,24 @@ def get_run_log(
     if not log_path.exists():
         return ""
     return log_path.read_text(errors="replace")
+
+
+@router.get("/{run_id}/config", response_model=dict)
+def get_run_effective_config(
+    run: Run = Depends(get_run_or_404),
+    _admin: User = Depends(get_current_admin),
+) -> dict[str, Any]:
+    """Return the run-config that was actually passed to `flwr run --run-config`.
+
+    Comes from `runs_data/run_<id>/_run_config.json` written by the orchestrator
+    at run start time. Includes backend injections (partition-name, output-dir).
+    Falls back to `run.run_config` (the saved draft) if the run never started.
+    """
+    if run.exp_dir:
+        config_path = Path(run.exp_dir) / "_run_config.json"
+        if config_path.exists():
+            return json.loads(config_path.read_text())
+    return dict(run.run_config or {})
 
 
 @router.get("/{run_id}/events", response_model=list[dict])
