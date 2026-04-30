@@ -66,6 +66,21 @@ export function getRunEvents(projectId: number, runId: number): Promise<RunEvent
   return apiFetch<RunEvent[]>(`/projects/${projectId}/runs/${runId}/events`, { auth: true })
 }
 
+/**
+ * Returns the run-config that was actually passed to `flwr run --run-config`,
+ * including backend-injected keys (partition-name, output-dir). Falls back to
+ * the saved draft config if the run never started.
+ */
+export function getRunEffectiveConfig(
+  projectId: number,
+  runId: number,
+): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>(
+    `/projects/${projectId}/runs/${runId}/config`,
+    { auth: true },
+  )
+}
+
 export async function getRunLog(projectId: number, runId: number): Promise<string> {
   const response = await fetch(`/api/projects/${projectId}/runs/${runId}/log`, {
     headers: {

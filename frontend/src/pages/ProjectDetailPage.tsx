@@ -30,6 +30,8 @@ import {
   FL_PARAM_RANGES,
   FL_STRATEGIES,
   STRATEGY_SPECIFIC_KEYS,
+  filterRunConfig,
+  splitStrategyOverrides,
   type FLParams,
   type StrategyId,
 } from '../api/flStrategies'
@@ -38,6 +40,7 @@ import {
   createRun,
   deleteRun,
   getRun,
+  getRunEffectiveConfig,
   getRunEvents,
   listRuns,
   startRun,
@@ -181,18 +184,45 @@ export function ProjectDetailPage() {
   const [selectedModel, setSelectedModel] = useState('')
   const [hparams, setHparams] = useState<ModelHParams | null>(null)
 
+  const [strategy, setStrategy] = useState<StrategyId | ''>('')
+  const [flParams, setFlParams] = useState<FLParams>({ ...FL_PARAM_DEFAULTS })
+
   const handleModelChange = (id: string) => {
     setSelectedModel(id)
     const def = FL_MODELS.find((m) => m.id === id)
-    setHparams(def ? { ...def.defaults } : null)
+    if (!def) {
+      setHparams(null)
+      return
+    }
+    let nextHparams: ModelHParams = { ...def.defaults }
+    if (strategy && def.per_strategy?.[strategy]) {
+      const { hparamPatch, flParamPatch } = splitStrategyOverrides(def.per_strategy[strategy])
+      nextHparams = { ...nextHparams, ...hparamPatch } as ModelHParams
+      if (Object.keys(flParamPatch).length > 0) {
+        setFlParams((prev) => ({ ...prev, ...flParamPatch }) as FLParams)
+      }
+    }
+    setHparams(nextHparams)
+  }
+
+  const handleStrategyChange = (next: StrategyId) => {
+    setStrategy(next)
+    const def = FL_MODELS.find((m) => m.id === selectedModel)
+    if (!def) return
+    const overrides = def.per_strategy?.[next]
+    if (!overrides) return
+    const { hparamPatch, flParamPatch } = splitStrategyOverrides(overrides)
+    if (Object.keys(hparamPatch).length > 0) {
+      setHparams((prev) => (prev ? ({ ...prev, ...hparamPatch } as ModelHParams) : prev))
+    }
+    if (Object.keys(flParamPatch).length > 0) {
+      setFlParams((prev) => ({ ...prev, ...flParamPatch }) as FLParams)
+    }
   }
 
   const updateHparam = <K extends keyof ModelHParams>(key: K, value: ModelHParams[K]) => {
     setHparams((prev) => (prev ? { ...prev, [key]: value } : prev))
   }
-
-  const [strategy, setStrategy] = useState<StrategyId | ''>('')
-  const [flParams, setFlParams] = useState<FLParams>({ ...FL_PARAM_DEFAULTS })
 
   const [stragglerParams, setStragglerParams] = useState<StragglerParams>({
     ...STRAGGLER_PARAM_DEFAULTS,
@@ -254,7 +284,10 @@ export function ProjectDetailPage() {
       'straggler-min-chunk': stragglerParams['min-chunk'],
       'straggler-min-epochs': stragglerParams['min-epochs'],
     }
-    return cfg
+    // Drop strategy-gated keys that don't apply to the picked strategy
+    // (e.g. proximal-mu when aggregation=fedavgm — would otherwise leak from
+    // FL_PARAM_DEFAULTS via the `...flParams` spread).
+    return strategy ? filterRunConfig(cfg, strategy as StrategyId) : cfg
   }
 
   const handleSave = async () => {
@@ -332,6 +365,34 @@ export function ProjectDetailPage() {
   const [runExperiment, setRunExperiment] = useState<SampleExperiment | null>(null)
   const [runExperimentError, setRunExperimentError] = useState<string | null>(null)
   const [runExperimentLoading, setRunExperimentLoading] = useState(false)
+
+  // "View training config" modal: shows the effective run-config that was
+  // actually passed to `flwr run --run-config`, including backend injections.
+  const [configModalRun, setConfigModalRun] = useState<Run | null>(null)
+  const [configModalData, setConfigModalData] = useState<Record<string, unknown> | null>(null)
+  const [configModalError, setConfigModalError] = useState<string | null>(null)
+  const [configModalLoading, setConfigModalLoading] = useState(false)
+
+  const openConfigModal = async (run: Run) => {
+    setConfigModalRun(run)
+    setConfigModalData(null)
+    setConfigModalError(null)
+    setConfigModalLoading(true)
+    try {
+      const cfg = await getRunEffectiveConfig(pid, run.id)
+      setConfigModalData(cfg)
+    } catch (err) {
+      setConfigModalError(err instanceof ApiError ? err.detail : 'Failed to load config')
+    } finally {
+      setConfigModalLoading(false)
+    }
+  }
+
+  const closeConfigModal = () => {
+    setConfigModalRun(null)
+    setConfigModalData(null)
+    setConfigModalError(null)
+  }
 
   const [datasetPath, setDatasetPath] = useState('')
   const [datasetBusy, setDatasetBusy] = useState(false)
@@ -1032,7 +1093,7 @@ export function ProjectDetailPage() {
                         <button
                           key={s.id}
                           type="button"
-                          onClick={() => setStrategy(s.id)}
+                          onClick={() => handleStrategyChange(s.id)}
                           className={
                             isActive
                               ? 'rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white'
@@ -1257,16 +1318,30 @@ export function ProjectDetailPage() {
             </section>
 
             <section id="section-training" className="scroll-mt-20">
-              <h2 className="text-2xl font-semibold tracking-tight text-neutral-900">
-                Training
-              </h2>
-              <p className="mt-1 text-sm text-neutral-600">
-                {currentRun
-                  ? `Run #${currentRun.id} — ${currentRun.status}${
-                      currentRun.status === 'running' ? ' (polling every 5s)' : ''
-                    }`
-                  : 'No active run yet. Configure the run above and click Start Training.'}
-              </p>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-semibold tracking-tight text-neutral-900">
+                    Training
+                  </h2>
+                  <p className="mt-1 text-sm text-neutral-600">
+                    {currentRun
+                      ? `Run #${currentRun.id} — ${currentRun.status}${
+                          currentRun.status === 'running' ? ' (polling every 5s)' : ''
+                        }`
+                      : 'No active run yet. Configure the run above and click Start Training.'}
+                  </p>
+                </div>
+                {currentRun && (
+                  <button
+                    type="button"
+                    onClick={() => openConfigModal(currentRun)}
+                    className="rounded border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-100"
+                    title="Show the run-config that was passed to flwr run"
+                  >
+                    View config
+                  </button>
+                )}
+              </div>
               <div className="mt-6">
                 {currentRun && (
                   <TrainingDashboard
@@ -1607,6 +1682,47 @@ export function ProjectDetailPage() {
             </section>
           </div>
         </main>
+
+        {configModalRun && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={closeConfigModal}
+          >
+            <div
+              className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-lg bg-white p-6 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-neutral-900">
+                    Run #{configModalRun.id} — effective config
+                  </h2>
+                  <p className="mt-1 text-xs text-neutral-500">
+                    Actual run-config passed to <code className="font-mono">flwr run --run-config</code>,
+                    including backend-injected keys (<code>partition-name</code>, <code>output-dir</code>).
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeConfigModal}
+                  className="rounded px-2 py-1 text-sm text-neutral-500 hover:bg-neutral-100"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="mt-4 flex-1 overflow-auto rounded border border-neutral-200 bg-neutral-50 p-3">
+                {configModalLoading && <p className="text-xs text-neutral-500">Loading…</p>}
+                {configModalError && <p className="text-xs text-red-700">{configModalError}</p>}
+                {configModalData && (
+                  <pre className="font-mono text-xs leading-relaxed text-neutral-800">
+                    {JSON.stringify(configModalData, null, 2)}
+                  </pre>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {showEdit && project && (
           <ProjectFormModal

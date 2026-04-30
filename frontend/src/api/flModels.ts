@@ -1,3 +1,5 @@
+import { CIFAR_PER_STRATEGY, type StrategyOverrides, type StrategyId } from './flStrategies'
+
 export type Optimizer = 'sgd' | 'adamw'
 
 export type ModelHParams = {
@@ -13,6 +15,12 @@ export type FlModelDef = {
   label: string
   description: string
   defaults: ModelHParams
+  /**
+   * Per-strategy overrides for (model, strategy) combinations. When user picks a strategy
+   * for this model, these values overwrite both `defaults` (ModelHParams keys) and the
+   * matching FLParams. Without an entry, only `defaults` are used.
+   */
+  per_strategy?: Record<StrategyId, StrategyOverrides>
 }
 
 export const FL_MODELS: FlModelDef[] = [
@@ -27,6 +35,7 @@ export const FL_MODELS: FlModelDef[] = [
       'client-weight-decay': 5e-4,
       'batch-size': 64,
     },
+    per_strategy: CIFAR_PER_STRATEGY,
   },
   {
     id: 'se_resnet',
@@ -39,6 +48,7 @@ export const FL_MODELS: FlModelDef[] = [
       'client-weight-decay': 5e-4,
       'batch-size': 64,
     },
+    per_strategy: CIFAR_PER_STRATEGY,
   },
   {
     id: 'effnet_b0',

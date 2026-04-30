@@ -36,6 +36,17 @@ export const STRATEGY_SPECIFIC_KEYS: Record<StrategyId, (keyof FLParams)[]> = {
   fednovam: ['server-momentum', 'server-lr'],
 }
 
+/**
+ * The complete list of FL keys that are only valid for *some* strategies. Used
+ * by `filterRunConfig` to drop a key when it doesn't belong to the picked
+ * strategy (e.g. `proximal-mu` when aggregation = FedAvgM).
+ */
+export const STRATEGY_GATED_KEYS = [
+  'server-momentum',
+  'server-lr',
+  'proximal-mu',
+] as const satisfies ReadonlyArray<keyof FLParams>
+
 export const FL_PARAM_LABELS: Record<keyof FLParams, string> = {
   'num-server-rounds': 'Server rounds',
   'local-epochs': 'Local epochs',
@@ -63,11 +74,107 @@ export const FL_PARAM_RANGES: Record<
 
 export const FL_PARAM_DEFAULTS: FLParams = {
   'num-server-rounds': 80,
-  'local-epochs': 2,
+  'local-epochs': 3,
   'fraction-train': 1.0,
   'min-train-nodes': 10,
   'min-available-nodes': 10,
   'server-momentum': 0.5,
   'server-lr': 1.0,
   'proximal-mu': 0.0005,
+}
+
+/**
+ * Per-strategy overrides applied when (model, strategy) is selected.
+ * Mirror of `fl_app/fl_app/models/__init__.py:_CIFAR_PER_STRATEGY`.
+ *
+ * Keys here may belong to either `FLParams` or `ModelHParams`; the form
+ * dispatcher routes each key to the right state slice.
+ */
+export type StrategyOverrides = Partial<{
+  // ModelHParams keys
+  'client-lr': number
+  'client-momentum': number
+  // FLParams keys
+  'local-epochs': number
+  'server-momentum': number
+  'server-lr': number
+  'proximal-mu': number
+}>
+
+export const CIFAR_PER_STRATEGY: Record<StrategyId, StrategyOverrides> = {
+  fedavg: {
+    'client-lr': 0.1,
+    'client-momentum': 0.9,
+    'local-epochs': 3,
+  },
+  fedavgm: {
+    'client-lr': 0.05,
+    'client-momentum': 0.9,
+    'local-epochs': 3,
+    'server-momentum': 0.5,
+    'server-lr': 1.0,
+  },
+  fedprox: {
+    'client-lr': 0.1,
+    'client-momentum': 0.9,
+    'local-epochs': 3,
+    'proximal-mu': 0.0005,
+  },
+  fednovam: {
+    'client-lr': 0.05,
+    'client-momentum': 0.9,
+    'local-epochs': 3,
+    'server-momentum': 0.5,
+    'server-lr': 1.0,
+  },
+}
+
+const HPARAM_OVERRIDE_KEYS: readonly string[] = ['client-lr', 'client-momentum']
+const FLPARAM_OVERRIDE_KEYS: readonly string[] = [
+  'local-epochs',
+  'server-momentum',
+  'server-lr',
+  'proximal-mu',
+]
+
+/**
+ * Split a `StrategyOverrides` blob into two patches: one for `ModelHParams`
+ * state, one for `FLParams` state. Form dispatchers apply each to the
+ * corresponding `useState` slice.
+ */
+export function splitStrategyOverrides(overrides: StrategyOverrides): {
+  hparamPatch: Record<string, unknown>
+  flParamPatch: Record<string, unknown>
+} {
+  const hparamPatch: Record<string, unknown> = {}
+  const flParamPatch: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(overrides)) {
+    if (v === undefined) continue
+    if (HPARAM_OVERRIDE_KEYS.includes(k)) {
+      hparamPatch[k] = v
+    } else if (FLPARAM_OVERRIDE_KEYS.includes(k)) {
+      flParamPatch[k] = v
+    }
+  }
+  return { hparamPatch, flParamPatch }
+}
+
+/**
+ * Strip strategy-gated keys (e.g. `proximal-mu`, `server-momentum`) that are
+ * not relevant to the picked strategy. Defense in depth: prevents a stale
+ * `flParams` value from leaking into the saved run-config.
+ */
+export function filterRunConfig<T extends Record<string, unknown>>(
+  rc: T,
+  strategy: StrategyId,
+): T {
+  const allowed = new Set<string>(STRATEGY_SPECIFIC_KEYS[strategy])
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(rc)) {
+    if ((STRATEGY_GATED_KEYS as readonly string[]).includes(k) && !allowed.has(k)) {
+      continue
+    }
+    out[k] = v
+  }
+  return out as T
 }
