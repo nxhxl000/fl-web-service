@@ -79,7 +79,11 @@ export function TrainingDashboard({ data: externalData, loading, error: external
         </ChartCard>
       </div>
       <ChartCard title="Straggler mitigation: round 1 vs rounds 2+">
-        <StragglerComparison clients={data.clients} rounds={data.rounds} />
+        <StragglerComparison
+          clients={data.clients}
+          rounds={data.rounds}
+          stragglerMode={String(data.summary.config['straggler-mode'] ?? 'none')}
+        />
       </ChartCard>
       {(data.summary.per_class_accuracy?.length ?? 0) > 0 && (
         <ChartCard title="Per-class accuracy (best model on test set)">
@@ -545,7 +549,28 @@ function HeterogeneityScatter({
   )
 }
 
-function StragglerComparison({ clients, rounds }: { clients: ClientRow[]; rounds: RoundRow[] }) {
+// What goes in the rightmost column of the per-client table — depends on the
+// active straggler-mitigation mode picked at run-config time.
+type AssignmentColumn = {
+  header: string
+  format: (v: number) => string
+}
+
+const ASSIGNMENT_COLUMN: Record<string, AssignmentColumn> = {
+  chunk:  { header: 'Assigned chunk',   format: (v) => v.toFixed(2) },
+  epochs: { header: 'Assigned epochs',  format: (v) => v.toFixed(1) },
+  drop:   { header: 'Dropped fraction', format: (v) => `${(v * 100).toFixed(0)}%` },
+  none:   { header: '—',                format: () => '—' },
+}
+
+function StragglerComparison({
+  clients, rounds, stragglerMode,
+}: {
+  clients: ClientRow[]
+  rounds: RoundRow[]
+  stragglerMode: string
+}) {
+  const colSpec = ASSIGNMENT_COLUMN[stragglerMode] ?? ASSIGNMENT_COLUMN.none
   const data = useMemo(() => {
     const pids = Array.from(new Set(clients.map((c) => c.partition_id))).sort((a, b) => a - b)
     return pids.map((pid) => {
@@ -553,19 +578,30 @@ function StragglerComparison({ clients, rounds }: { clients: ClientRow[]; rounds
       const rest = clients.filter((c) => c.partition_id === pid && c.round > 1)
       const restAvg =
         rest.length === 0 ? 0 : rest.reduce((acc, c) => acc + c.t_compute, 0) / rest.length
-      const restChunk =
-        rest.length === 0
-          ? 1
-          : rest.reduce((acc, c) => acc + c.chunk_fraction, 0) / rest.length
+      // Per-mode aggregate over rounds 2+:
+      //   chunk  → mean chunk_fraction (what each client was assigned)
+      //   epochs → mean local_epochs (how many epochs each client ran)
+      //   drop   → fraction of rounds where w_client==0 (i.e. dropped)
+      //   none   → 0 (column shows "—")
+      let assigned = 0
+      if (rest.length > 0) {
+        if (stragglerMode === 'chunk') {
+          assigned = rest.reduce((acc, c) => acc + c.chunk_fraction, 0) / rest.length
+        } else if (stragglerMode === 'epochs') {
+          assigned = rest.reduce((acc, c) => acc + c.local_epochs, 0) / rest.length
+        } else if (stragglerMode === 'drop') {
+          assigned = rest.filter((c) => c.w_client === 0).length / rest.length
+        }
+      }
       const label = (r1 ?? rest[0])?.node_name || `pid ${pid}`
       return {
         pid: label,
         'Round 1 t_compute (s)': r1 ? +r1.t_compute.toFixed(1) : 0,
         'Rounds 2+ avg t_compute (s)': +restAvg.toFixed(1),
-        chunk: +restChunk.toFixed(2),
+        assigned,
       }
     })
-  }, [clients])
+  }, [clients, stragglerMode])
 
   const restSlice = rounds.slice(1)
   const hasRest = restSlice.length > 0
@@ -579,7 +615,8 @@ function StragglerComparison({ clients, rounds }: { clients: ClientRow[]; rounds
     <div>
       <p className="mb-3 text-xs text-neutral-600">
         Bars show per-client compute time before mitigation (round 1) and after (rounds 2+ avg).
-        Chunk-fraction column reflects what each client was assigned by the round-1 schedule.
+        Last column reflects the active straggler-mitigation mode (<code className="font-mono">{stragglerMode}</code>):
+        chunk = assigned data fraction, epochs = assigned local-epoch count, drop = share of rounds the client was excluded.
       </p>
       <div className="mb-4 flex flex-wrap gap-2 text-xs">
         <Pill
@@ -624,7 +661,7 @@ function StragglerComparison({ clients, rounds }: { clients: ClientRow[]; rounds
               <th className="px-3 py-2 font-medium">Node</th>
               <th className="px-3 py-2 font-medium">Round 1 t_compute</th>
               <th className="px-3 py-2 font-medium">Rounds 2+ avg</th>
-              <th className="px-3 py-2 font-medium">Assigned chunk</th>
+              <th className="px-3 py-2 font-medium">{colSpec.header}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-200">
@@ -633,7 +670,7 @@ function StragglerComparison({ clients, rounds }: { clients: ClientRow[]; rounds
                 <td className="px-3 py-2 text-neutral-900">{d.pid}</td>
                 <td className="px-3 py-2 text-neutral-700">{d['Round 1 t_compute (s)']} s</td>
                 <td className="px-3 py-2 text-neutral-700">{d['Rounds 2+ avg t_compute (s)']} s</td>
-                <td className="px-3 py-2 text-neutral-700">{d.chunk}</td>
+                <td className="px-3 py-2 text-neutral-700">{colSpec.format(d.assigned)}</td>
               </tr>
             ))}
           </tbody>
