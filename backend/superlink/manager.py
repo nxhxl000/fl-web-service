@@ -73,13 +73,21 @@ def ensure_running() -> None:
         "--database", str(SUPERLINK_DB),
         "--storage-dir", str(SUPERLINK_FFS),
     ]
+    # SuperLink spawns `flower-superexec` as a child by bare name (relies on
+    # PATH). When uvicorn is launched as `.venv/bin/uvicorn ...` without venv
+    # activation, the venv's bin/ is NOT in PATH and the spawn fails with
+    # `FileNotFoundError: 'flower-superexec'`. Prepend it explicitly.
+    bin_dir = str(Path(SUPERLINK_BIN).parent)
+    child_env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    child_env["PATH"] = bin_dir + os.pathsep + child_env.get("PATH", "")
+
     log_fp = open(SUPERLINK_LOG, "ab")  # noqa: SIM115 — owned by detached child
     proc = subprocess.Popen(
         cmd,
         stdout=log_fp,
         stderr=subprocess.STDOUT,
         start_new_session=True,  # detached: survives backend restart / SIGTERM
-        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        env=child_env,
     )
 
     deadline = time.time() + HEALTH_TIMEOUT_S
