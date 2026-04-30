@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -223,6 +224,11 @@ def start_run(
     pid, log_path, exp_dir = get_orchestrator().start(
         run.id, run.federation, effective_rc, contract
     )
+    logging.getLogger("ops").info(
+        "run %d started pid=%d federation=%s strategy=%s model=%s",
+        run.id, pid, run.federation,
+        effective_rc.get("aggregation"), effective_rc.get("model"),
+    )
     return mark_run_started(db, run, pid, str(log_path), str(exp_dir))
 
 
@@ -259,6 +265,7 @@ def cancel_one_run(
             except (_sp.TimeoutExpired, OSError):
                 pass  # best-effort; mark cancelled regardless
 
+    logging.getLogger("ops").info("run %d cancelled by admin", run.id)
     return mark_run_cancelled(db, run)
 
 

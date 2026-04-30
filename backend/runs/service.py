@@ -115,9 +115,11 @@ def finalize_run(db: Session, run_id: int, exit_code: int) -> None:
         return
     run.exit_code = exit_code
     run.finished_at = datetime.now(timezone.utc)
+    final_status = run.status
     if run.status == "running":
         if exit_code == 0:
             run.status = "completed"
+            final_status = "completed"
             try:
                 _register_trained_model_from_run(db, run)
             except Exception as e:  # registration is best-effort, never poison the run record
@@ -125,8 +127,12 @@ def finalize_run(db: Session, run_id: int, exit_code: int) -> None:
                 run.error_message = f"Run completed but auto-register failed: {e}"
         else:
             run.status = "failed"
+            final_status = "failed"
             run.error_message = f"Process exited with code {exit_code}"
     db.commit()
+    logging.getLogger("ops").info(
+        "run %d finalized status=%s exit_code=%d", run_id, final_status, exit_code
+    )
 
 
 def _register_trained_model_from_run(db: Session, run: Run) -> None:
