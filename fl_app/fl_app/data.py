@@ -45,9 +45,17 @@ def _is_hf_layout(d: Path) -> bool:
 
 
 def _build_transforms(*, image_size, mean, std, train: bool):
+    # Train aug branches by image size: ≤64px → CIFAR recipe (RandomCrop+pad),
+    # >64px → ImageNet recipe (RandomResizedCrop). Eval is always plain Resize.
     h, w = int(image_size[0]), int(image_size[1])
-    ops: list = [transforms.Resize((h, w))]
+    ops: list = []
+    if train and h > 64:
+        ops.append(transforms.RandomResizedCrop((h, w), scale=(0.8, 1.0)))
+    else:
+        ops.append(transforms.Resize((h, w)))
     if train:
+        if h <= 64:
+            ops.append(transforms.RandomCrop(h, padding=4))
         ops.append(transforms.RandomHorizontalFlip())
     ops += [transforms.ToTensor(), transforms.Normalize(tuple(mean), tuple(std))]
     return transforms.Compose(ops)
