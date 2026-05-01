@@ -69,9 +69,10 @@ def _wait_for_clock_sync(
     last_drift: float | None = None
     while True:
         try:
-            req = urllib.request.Request(url, method="HEAD")
+            req = urllib.request.Request(url)  # GET — /health doesn't accept HEAD
             with urllib.request.urlopen(req, timeout=5) as resp:
                 date_hdr = resp.headers.get("Date")
+                resp.read()  # drain response body
             if date_hdr:
                 server_time = email.utils.parsedate_to_datetime(date_hdr).timestamp()
                 drift = abs(time.time() - server_time)
