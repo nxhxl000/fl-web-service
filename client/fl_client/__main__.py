@@ -14,6 +14,7 @@ Env vars:
   FL_INSECURE          (default 1) pass --insecure to flwr-supernode
 """
 
+import email.utils
 import json
 import logging
 import os
@@ -21,6 +22,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -49,6 +51,44 @@ def _require_env(name: str) -> str:
         log.error("%s is not set", name)
         sys.exit(2)
     return value
+
+
+def _wait_for_clock_sync(
+    server_url: str, max_wait_s: int = 300, threshold_s: float = 5.0
+) -> None:
+    """Block until our clock is within `threshold_s` of the backend's HTTP Date header.
+
+    Cloud VMs can boot the container before NTP has finished syncing. Flower 1.28
+    rejects gRPC handshakes with `Invalid timestamp` if drift exceeds its internal
+    tolerance, and the bad handshake state poisons the heartbeat thread for the rest
+    of the run. Probing our own backend's `Date` header sidesteps that race without
+    needing UDP/123 to NTP servers.
+    """
+    deadline = time.time() + max_wait_s
+    url = f"{server_url}/health"
+    last_drift: float | None = None
+    while True:
+        try:
+            req = urllib.request.Request(url, method="HEAD")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                date_hdr = resp.headers.get("Date")
+            if date_hdr:
+                server_time = email.utils.parsedate_to_datetime(date_hdr).timestamp()
+                drift = abs(time.time() - server_time)
+                last_drift = drift
+                if drift <= threshold_s:
+                    log.info("clock sync ok: drift=%.1fs", drift)
+                    return
+                log.info("clock sync: drift=%.1fs > %.1fs, waiting...", drift, threshold_s)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("clock sync probe failed: %s", exc)
+        if time.time() > deadline:
+            log.error(
+                "clock sync: giving up after %ds (last drift=%.1fs); supernode will likely fail",
+                max_wait_s, last_drift if last_drift is not None else -1,
+            )
+            return
+        time.sleep(3)
 
 
 def _fetch_contract(server_url: str, token: str) -> dict:
@@ -192,6 +232,8 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
+
+    _wait_for_clock_sync(server_url)
 
     log.info("fetching project contract from %s", server_url)
     try:
